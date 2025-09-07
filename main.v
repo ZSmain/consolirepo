@@ -147,13 +147,40 @@ fn (r &Runner) should_ignore_file(file_path string) bool {
 }
 
 fn match_wildcard(pattern string, text string) bool {
-	// Simple wildcard matching - replace * with .* for regex
-	mut regex_pattern := pattern.replace('*', '.*').replace('?', '.')
-	// Escape dots that aren't from our wildcard replacement
-	regex_pattern = regex_pattern.replace('.', '\\.')
-	regex_pattern = regex_pattern.replace('\\.\\*', '.*')
-
-	re := regex.regex_opt('^' + regex_pattern + '$') or { return false }
+	// Handle simple cases first
+	if pattern == '*' {
+		return true
+	}
+	if !pattern.contains('*') && !pattern.contains('?') {
+		return pattern == text
+	}
+	
+	// Convert wildcard pattern to regex
+	mut regex_pattern := ''
+	for c in pattern {
+		match c {
+			`*` {
+				regex_pattern += '.*'
+			}
+			`?` {
+				regex_pattern += '.'
+			}
+			`.` {
+				regex_pattern += '\\.'
+			}
+			`^`, `$`, `(`, `)`, `[`, `]`, `{`, `}`, `|`, `+`, `\\` {
+				regex_pattern += '\\${c}'
+			}
+			else {
+				regex_pattern += c.ascii_str()
+			}
+		}
+	}
+	
+	re := regex.regex_opt('^' + regex_pattern + '$') or { 
+		// Fallback to simple string matching for failed regex
+		return text.contains(pattern.replace('*', ''))
+	}
 	return re.matches_string(text)
 }
 

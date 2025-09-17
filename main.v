@@ -299,7 +299,7 @@ fn main() {
 		posix_mode:  true
 		execute:     fn (cmd cli.Command) ! {
 			// Get flag values
-			repo := cmd.flags.get_string('repo') or { '' }
+			repo := cmd.flags.get_string('repo')!
 			output := cmd.flags.get_string('output') or { '' }
 			extensions := cmd.flags.get_string('ext') or { '' }
 

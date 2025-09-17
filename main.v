@@ -2,7 +2,7 @@ module main
 
 import os
 import time
-import flag
+import cli
 import regex
 import strings
 
@@ -292,46 +292,68 @@ fn (mut r Runner) process() ! {
 }
 
 fn main() {
-	mut fp := flag.new_flag_parser(os.args)
-	fp.application('consolirepo')
-	fp.description('Convert a repository into a single text file for language model processing')
-	fp.version('0.1.0')
+	mut app := cli.Command{
+		name:        'consolirepo'
+		description: 'Convert a repository into a single text file for language model processing'
+		version:     '0.1.0'
+		posix_mode:  true
+		execute:     fn (cmd cli.Command) ! {
+			// Get flag values
+			repo := cmd.flags.get_string('repo') or { '' }
+			output := cmd.flags.get_string('output') or { '' }
+			extensions := cmd.flags.get_string('ext') or { '' }
 
-	repo := fp.string('repo', `r`, '', 'Path to the repository to process (required)')
-	out := fp.string('output', `o`, '', 'Output file path (default: PROJECT_NAME_llm_YYYY-MM-DD.txt)')
-	extensions := fp.string('ext', `e`, '', 'Comma-separated extensions to include (e.g. .go,.rs,.py)')
+			// Validate required arguments
+			if repo == '' {
+				eprintln('Error: --repo is required')
+				println(cmd.help_message())
+				return
+			}
 
-	fp.finalize() or {
-		eprintln('Error: ${err}')
-		println(fp.usage())
-		return
-	}
+			abs_repo := os.real_path(repo)
+			if !os.exists(abs_repo) {
+				eprintln('Error: ${abs_repo} does not exist')
+				return
+			}
+			if !os.is_dir(abs_repo) {
+				eprintln('Error: ${abs_repo} is not a directory')
+				return
+			}
 
-	if repo == '' {
-		eprintln('Error: -repo is required')
-		println(fp.usage())
-		return
-	}
+			// Parse extensions if provided
+			mut ext_list := []string{}
+			if extensions != '' {
+				ext_list = extensions.split(',').map(it.trim_space().to_lower())
+			}
 
-	abs_repo := os.real_path(repo)
-	if !os.exists(abs_repo) {
-		eprintln('Error: ${abs_repo} does not exist')
-		return
+			mut runner := new_runner(abs_repo, output, ext_list)
+			runner.process() or {
+				eprintln('Processing failed: ${err}')
+				return
+			}
+		}
+		flags: [
+			cli.Flag{
+				flag:        .string
+				name:        'repo'
+				abbrev:      'r'
+				description: 'Path to the repository to process (required)'
+				required:    true
+			},
+			cli.Flag{
+				flag:        .string
+				name:        'output'
+				abbrev:      'o'
+				description: 'Output file path (default: PROJECT_NAME_llm_YYYY-MM-DD.txt)'
+			},
+			cli.Flag{
+				flag:        .string
+				name:        'ext'
+				abbrev:      'e'
+				description: 'Comma-separated extensions to include (e.g. .go,.rs,.py)'
+			}
+		]
 	}
-	if !os.is_dir(abs_repo) {
-		eprintln('Error: ${abs_repo} is not a directory')
-		return
-	}
-
-	// Parse extensions if provided
-	mut ext_list := []string{}
-	if extensions != '' {
-		ext_list = extensions.split(',').map(it.trim_space().to_lower())
-	}
-
-	mut runner := new_runner(abs_repo, out, ext_list)
-	runner.process() or {
-		eprintln('Processing failed: ${err}')
-		return
-	}
+	app.setup()
+	app.parse(os.args)
 }

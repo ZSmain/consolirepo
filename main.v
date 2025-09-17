@@ -4,6 +4,7 @@ import os
 import time
 import flag
 import regex
+import strings
 
 struct Runner {
 mut:
@@ -75,6 +76,9 @@ const common_exclusions = ['.git', 'node_modules', '.venv', 'venv', 'env', '__py
 	'.pytest_cache', '.DS_Store', 'Thumbs.db', 'pnpm-lock.yaml', 'bun.lock', 'yarn.lock', '*.min.js',
 	'*.min.css', 'dist', 'build', 'target']
 
+const max_file_size = 1 * 1024 * 1024 // 1MB limit for individual files
+
+// new_runner creates a new Runner instance with the given parameters
 fn new_runner(repo string, out string, include_extensions []string) Runner {
 	final_include := if include_extensions.len > 0 {
 		include_extensions.clone()
@@ -93,6 +97,8 @@ fn new_runner(repo string, out string, include_extensions []string) Runner {
 	}
 }
 
+// parse_gitignore reads .gitignore file and parses patterns
+// Handles basic gitignore syntax including directory patterns
 fn (mut r Runner) parse_gitignore() {
 	gitignore_path := os.join_path(r.repo_root, '.gitignore')
 	mut patterns := []string{}
@@ -114,6 +120,7 @@ fn (mut r Runner) parse_gitignore() {
 	r.gitignore_patterns = patterns
 }
 
+// should_ignore_file checks if a file should be ignored based on gitignore patterns
 fn (r &Runner) should_ignore_file(file_path string) bool {
 	rel_path := file_path.replace(r.repo_root, '').trim_string_left('/')
 	file_name := os.base(file_path)
@@ -154,36 +161,41 @@ fn match_wildcard(pattern string, text string) bool {
 	if !pattern.contains('*') && !pattern.contains('?') {
 		return pattern == text
 	}
-	
-	// Convert wildcard pattern to regex
-	mut regex_pattern := ''
+
+	// Convert wildcard pattern to regex using strings.Builder for efficiency
+	mut sb := strings.new_builder(pattern.len * 2)
 	for c in pattern {
 		match c {
 			`*` {
-				regex_pattern += '.*'
+				sb.write_string('.*')
 			}
 			`?` {
-				regex_pattern += '.'
+				sb.write_u8(`.`)
 			}
 			`.` {
-				regex_pattern += '\\.'
+				sb.write_string('\\.')
 			}
 			`^`, `$`, `(`, `)`, `[`, `]`, `{`, `}`, `|`, `+`, `\\` {
-				regex_pattern += '\\${c}'
+				sb.write_u8(`\\`)
+				sb.write_u8(c)
 			}
 			else {
-				regex_pattern += c.ascii_str()
+				sb.write_string(c.ascii_str())
 			}
 		}
 	}
-	
-	re := regex.regex_opt('^' + regex_pattern + '$') or { 
+
+	regex_pattern := sb.str()
+	re := regex.regex_opt('^' + regex_pattern + '$') or {
 		// Fallback to simple string matching for failed regex
 		return text.contains(pattern.replace('*', ''))
 	}
+
 	return re.matches_string(text)
 }
 
+// walk_directory recursively traverses the directory tree and processes files
+// It writes included file contents to the output file and collects binary files
 fn (mut r Runner) walk_directory(root_path string, mut f os.File) ! {
 	entries := os.ls(root_path) or { return }
 
@@ -206,6 +218,13 @@ fn (mut r Runner) walk_directory(root_path string, mut f os.File) ! {
 
 			// Check if we should include this extension
 			if ext in r.include_ext {
+				// Check file size before reading
+				file_size := os.file_size(entry_path)
+				if file_size > max_file_size {
+					eprintln('Skipping large file ${entry_path} (${file_size} bytes)')
+					continue
+				}
+
 				content := os.read_file(entry_path) or {
 					eprintln('Could not read ${entry_path}: ${err}')
 					continue
@@ -232,6 +251,7 @@ fn (mut r Runner) walk_directory(root_path string, mut f os.File) ! {
 	}
 }
 
+// process is the main processing function that orchestrates the repository consolidation
 fn (mut r Runner) process() ! {
 	println('Processing repository: ${r.repo_root}')
 
@@ -294,17 +314,24 @@ fn main() {
 	}
 
 	abs_repo := os.real_path(repo)
-	if !os.exists(abs_repo) || !os.is_dir(abs_repo) {
-		eprintln('Error: ${abs_repo} is not a valid directory')
+	if !os.exists(abs_repo) {
+		eprintln('Error: ${abs_repo} does not exist')
+		return
+	}
+	if !os.is_dir(abs_repo) {
+		eprintln('Error: ${abs_repo} is not a directory')
 		return
 	}
 
 	// Parse extensions if provided
 	mut ext_list := []string{}
 	if extensions != '' {
-		ext_list = extensions.split(',').map(it.trim_space())
+		ext_list = extensions.split(',').map(it.trim_space().to_lower())
 	}
 
 	mut runner := new_runner(abs_repo, out, ext_list)
-	runner.process() or { eprintln('Error: ${err}') }
+	runner.process() or {
+		eprintln('Processing failed: ${err}')
+		return
+	}
 }

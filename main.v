@@ -303,13 +303,6 @@ fn main() {
 			output := cmd.flags.get_string('output') or { '' }
 			extensions := cmd.flags.get_string('ext') or { '' }
 
-			// Validate required arguments
-			if repo == '' {
-				eprintln('Error: --repo is required')
-				println(cmd.help_message())
-				return
-			}
-
 			abs_repo := os.real_path(repo)
 			if !os.exists(abs_repo) {
 				eprintln('Error: ${abs_repo} does not exist')

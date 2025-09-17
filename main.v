@@ -305,12 +305,10 @@ fn main() {
 
 			abs_repo := os.real_path(repo)
 			if !os.exists(abs_repo) {
-				eprintln('Error: ${abs_repo} does not exist')
-				return
+				return error('Error: ${abs_repo} does not exist')
 			}
 			if !os.is_dir(abs_repo) {
-				eprintln('Error: ${abs_repo} is not a directory')
-				return
+				return error('Error: ${abs_repo} is not a directory')
 			}
 
 			// Parse extensions if provided
@@ -321,8 +319,7 @@ fn main() {
 
 			mut runner := new_runner(abs_repo, output, ext_list)
 			runner.process() or {
-				eprintln('Processing failed: ${err}')
-				return
+				return error('Processing failed: ${err}')
 			}
 		}
 		flags: [

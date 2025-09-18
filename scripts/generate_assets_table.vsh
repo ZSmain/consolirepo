@@ -1,8 +1,13 @@
 #!/usr/bin/env -S v -raw-vsh-tmp-prefix tmp_generate_assets
 
-// generate_assets_table.vsh - Generate release assets table and build cross-platform executables
+// generate_assets_table.vsh - Build consolirepo executables and generate release assets table
 import os
-import flag
+import cli
+
+// Hardcoded constants for this specific application
+const repo = 'ZSmain/consolirepo'
+const source_file = 'main.v'
+const output_dir = 'bin'
 
 struct AssetRow {
 	os   string
@@ -18,56 +23,50 @@ struct BuildTarget {
 }
 
 fn main() {
-	mut fp := flag.new_flag_parser(os.args)
-	fp.application('generate_assets_table')
-	fp.description('Generate a Markdown downloads table for release assets and build cross-platform executables')
-
-	// Asset table generation options
-	dist := fp.string('dist', `d`, 'bin', 'Directory with built assets')
-	tag := fp.string('tag', `t`, '', 'Release tag (e.g. v0.1.0) [required for table generation]')
-	repo := fp.string('repo', `r`, '', 'owner/repo (e.g. ZSmain/consolirepo) [required for table generation]')
-
-	// Build options
-	build := fp.bool('build', `b`, false, 'Build cross-platform executables')
-	source := fp.string('source', `s`, 'main.v', 'Source file to build')
-	output_dir := fp.string('output', `o`, 'bin', 'Output directory for builds')
-
-	fp.finalize() or {
-		eprintln('Error: ${err}')
-		exit(1)
+	mut app := cli.Command{
+		name:        'generate_assets_table'
+		description: 'Build consolirepo executables and generate release assets table'
+		posix_mode:  true
+		execute:     fn (cmd cli.Command) ! {
+			// Get tag (required)
+			tag := cmd.flags.get_string('tag')!
+			
+			println('🚀 Building consolirepo release ${tag}')
+			
+			// Always build first
+			build_cross_platform()!
+			
+			// Then generate assets table
+			generate_assets_table(tag)!
+		}
+		flags: [
+			cli.Flag{
+				flag:        .string
+				name:        'tag'
+				abbrev:      't'
+				description: 'Release tag (e.g. v0.1.0)'
+				required:    true
+			}
+		]
 	}
-
-	// Generate assets table if requested
-	if tag != '' && repo != '' {
-		generate_assets_table(dist, tag, repo)!
-	} else if !build {
-		eprintln('Error: Either provide --tag and --repo for table generation, or use --build for cross-compilation')
-		println(fp.usage())
-		exit(1)
-	}
-
-	// Build cross-platform executables if requested
-	if build {
-		build_cross_platform(source, output_dir)!
-	}
+	app.setup()
+	app.parse(os.args)
 }
 
-fn generate_assets_table(dist string, tag string, repo string) ! {
-	println('🔍 Generating assets table for ${repo} v${tag}')
+fn generate_assets_table(tag string) ! {
+	println('🔍 Generating assets table for ${repo} ${tag}')
 
-	if !os.exists(dist) {
-		eprintln('Error: Directory ${dist} does not exist')
-		exit(1)
+	if !os.exists(output_dir) {
+		return error('Directory ${output_dir} does not exist')
 	}
 
-	files := os.ls(dist) or {
-		eprintln('Could not read ${dist}: ${err}')
-		exit(1)
+	files := os.ls(output_dir) or {
+		return error('Could not read ${output_dir}: ${err}')
 	}
 
 	mut rows := []AssetRow{}
 	for name in files {
-		path := os.join_path(dist, name)
+		path := os.join_path(output_dir, name)
 		if os.is_dir(path) {
 			continue
 		}
@@ -85,7 +84,6 @@ fn generate_assets_table(dist string, tag string, repo string) ! {
 		if arch == '' {
 			arch = 'x86_64'
 		}
-		// sane default
 
 		url := 'https://github.com/${repo}/releases/download/${tag}/${name}'
 		rows << AssetRow{
@@ -97,7 +95,7 @@ fn generate_assets_table(dist string, tag string, repo string) ! {
 	}
 
 	if rows.len == 0 {
-		println('⚠️  No asset files found in ${dist}')
+		println('⚠️  No asset files found in ${output_dir}')
 		return
 	}
 
@@ -118,42 +116,37 @@ fn generate_assets_table(dist string, tag string, repo string) ! {
 	}
 
 	// Save to file
-	assets_file := os.join_path(dist, 'ASSETS.md')
+	assets_file := os.join_path(output_dir, 'ASSETS.md')
 	mut f := os.create(assets_file) or {
-		eprintln('Could not create ${assets_file}: ${err}')
-		return
+		return error('Could not create ${assets_file}: ${err}')
 	}
 	defer { f.close() }
 
-	f.writeln('# Release Assets - ${repo} v${tag}') or {
-		eprintln('Could not write to ${assets_file}: ${err}')
-		return
+	f.writeln('# Release Assets - ${repo} ${tag}') or {
+		return error('Could not write to ${assets_file}: ${err}')
 	}
 	f.writeln('') or { return }
 	f.writeln('| OS | Arch | Filename | Download |') or { return }
 	f.writeln('| --- | --- | --- | --- |') or { return }
 	for r in rows {
 		f.writeln('| ${r.os} | ${r.arch} | ${r.file} | [Download](${r.url}) |') or {
-			eprintln('Could not write to ${assets_file}: ${err}')
-			return
+			return error('Could not write to ${assets_file}: ${err}')
 		}
 	}
 
 	println('✅ Assets table saved to ${assets_file}')
 }
 
-fn build_cross_platform(source string, output_dir string) ! {
+fn build_cross_platform() ! {
 	println('🔨 Building cross-platform executables...')
 
-	if !os.exists(source) {
-		eprintln('Error: Source file ${source} does not exist')
-		return
+	if !os.exists(source_file) {
+		return error('Source file ${source_file} does not exist')
 	}
 
 	// Create output directory
 	os.mkdir_all(output_dir) or {
-		eprintln('Could not create output directory ${output_dir}: ${err}')
-		return
+		return error('Could not create output directory ${output_dir}: ${err}')
 	}
 
 	// Define build targets - Linux and Windows only
@@ -190,7 +183,7 @@ fn build_cross_platform(source string, output_dir string) ! {
 		println('  Building ${target.os}/${target.arch}...')
 
 		// Cross-compilation for Linux/Windows
-		cmd := 'v -os ${target.os} -arch ${target.arch} -prod -o ${output_path} ${source}'
+		cmd := 'v -os ${target.os} -arch ${target.arch} -prod -o ${output_path} ${source_file}'
 		result := os.execute(cmd)
 		build_success := result.exit_code == 0
 
@@ -204,10 +197,11 @@ fn build_cross_platform(source string, output_dir string) ! {
 
 	println('\n📊 Build Summary: ${success_count}/${targets.len} targets successful')
 
-	if success_count > 0 {
-		println('📁 Executables saved to: ${output_dir}')
-		generate_assets_table(output_dir, 'latest', 'ZSmain/consolirepo')!
+	if success_count == 0 {
+		return error('All builds failed')
 	}
+
+	println('📁 Executables saved to: ${output_dir}')
 }
 
 fn infer_os(name string) string {

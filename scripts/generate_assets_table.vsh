@@ -44,7 +44,7 @@ fn main() {
 				flag:        .string
 				name:        'tag'
 				abbrev:      't'
-				description: 'Release tag (e.g. v0.1.0)'
+				description: 'Release tag (e.g. v0.3.0)'
 				required:    true
 			}
 		]

@@ -295,7 +295,7 @@ fn main() {
 	mut app := cli.Command{
 		name:        'consolirepo'
 		description: 'Convert a repository into a single text file for language model processing'
-		version:     '0.1.0'
+		version:     '0.3.0'
 		posix_mode:  true
 		execute:     fn (cmd cli.Command) ! {
 			// Get flag values

@@ -78,6 +78,13 @@ const common_exclusions = ['.git', 'node_modules', '.venv', 'venv', 'env', '__py
 
 const max_file_size = 1 * 1024 * 1024 // 1MB limit for individual files
 
+// Helper for tree sorting
+struct TreeItem {
+	name   string
+	path   string
+	is_dir bool
+}
+
 // new_runner creates a new Runner instance with the given parameters
 fn new_runner(repo string, out string, include_extensions []string) Runner {
 	final_include := if include_extensions.len > 0 {
@@ -251,6 +258,77 @@ fn (mut r Runner) walk_directory(root_path string, mut f os.File) ! {
 	}
 }
 
+// Append directory tree at end of output
+fn (r &Runner) append_dir_tree(mut f os.File) ! {
+	f.write_string('\n\n## DIRECTORY TREE\n\n')!
+	root_name := os.base(r.repo_root)
+	f.write_string('${root_name}\n')!
+
+	mut lines := []string{}
+	r.build_dir_tree(r.repo_root, '', mut lines)!
+	for line in lines {
+		f.write_string('${line}\n')!
+	}
+}
+
+fn (r &Runner) build_dir_tree(dir_path string, prefix string, mut lines []string) ! {
+	entries := os.ls(dir_path) or { return }
+
+	// Resolve absolute output path once to avoid including it in the tree
+	mut out_abs := ''
+	if r.out_file != '' {
+		out_abs = os.real_path(r.out_file)
+	}
+
+	mut items := []TreeItem{}
+	for name in entries {
+		path := os.join_path(dir_path, name)
+
+		// Skip the generated output file if it resides in the repo
+		if out_abs != '' && os.real_path(path) == out_abs {
+			continue
+		}
+
+		// Respect gitignore/common exclusions
+		if r.should_ignore_file(path) {
+			continue
+		}
+
+		items << TreeItem{
+			name:   name
+			path:   path
+			is_dir: os.is_dir(path)
+		}
+	}
+
+	// Sort: directories first, then files; alphabetical by name
+	items.sort_with_compare(fn (a &TreeItem, b &TreeItem) int {
+		if a.is_dir && !b.is_dir {
+			return -1
+		}
+		if !a.is_dir && b.is_dir {
+			return 1
+		}
+		if a.name < b.name {
+			return -1
+		}
+		if a.name > b.name {
+			return 1
+		}
+		return 0
+	})
+
+	for i, item in items {
+		last := i == items.len - 1
+		connector := if last { '└── ' } else { '├── ' }
+		lines << prefix + connector + item.name
+		if item.is_dir {
+			new_prefix := prefix + if last { '    ' } else { '│   ' }
+			r.build_dir_tree(item.path, new_prefix, mut lines)!
+		}
+	}
+}
+
 // process is the main processing function that orchestrates the repository consolidation
 fn (mut r Runner) process() ! {
 	println('Processing repository: ${r.repo_root}')
@@ -286,6 +364,9 @@ fn (mut r Runner) process() ! {
 		}
 	}
 
+	// Append directory tree for extra context
+	r.append_dir_tree(mut f)!
+
 	f.flush()
 	println('Repository consolidation complete!')
 	println('Files included: ${r.files_included}, Binary files listed: ${r.binary_files.len}, Bytes written: ${r.bytes_written}')
@@ -295,7 +376,7 @@ fn main() {
 	mut app := cli.Command{
 		name:        'consolirepo'
 		description: 'Convert a repository into a single text file for language model processing'
-		version:     '0.3.0'
+		version:     '0.4.0'
 		posix_mode:  true
 		execute:     fn (cmd cli.Command) ! {
 			// Get flag values
